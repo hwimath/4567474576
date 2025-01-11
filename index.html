@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>시간의 차</title>
+    <style>
+        body {
+            font-family: 'Nanum Gothic', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f8ff;
+        }
+        #game-container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 600px;
+            width: 100%;
+        }
+        h1 {
+            color: #3a3a3a;
+            font-size: 2.5em;
+            margin-bottom: 20px;
+        }
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 8px 4px;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #energy-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #e0e0e0;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+        #energy-fill {
+            height: 100%;
+            width: 100%;
+            background-color: #4CAF50;
+            border-radius: 10px;
+            transition: width 0.1s linear;
+        }
+        #question, #score, #chances, #total-time {
+            margin-bottom: 20px;
+            font-size: 1.2em;
+        }
+        #answer-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        .hidden {
+            display: none;
+        }
+        #result-screen {
+            font-size: 1.3em;
+            margin-bottom: 30px;
+        }
+        input[type="text"] {
+            padding: 10px;
+            font-size: 16px;
+            margin-bottom: 20px;
+            width: 80%;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <h1>시간의 차</h1>
+        <div id="start-screen">
+            <input type="text" id="player-name" placeholder="이름을 입력하세요" required />
+            <h2>난이도를 선택하세요</h2>
+            <button onclick="startGame('veryHard')">최상</button>
+            <button onclick="startGame('hard')">상</button>
+            <button onclick="startGame('medium')">중</button>
+            <button onclick="startGame('easy')">하</button>
+        </div>
+        <div id="game-screen" class="hidden">
+            <div id="energy-bar"><div id="energy-fill"></div></div>
+            <div id="question"></div>
+            <div id="answer-buttons">
+                <button onclick="checkAnswer(0)"></button>
+                <button onclick="checkAnswer(1)"></button>
+                <button onclick="checkAnswer(2)"></button>
+                <button onclick="checkAnswer(3)"></button>
+            </div>
+            <div id="score">점수: 0</div>
+            <div id="chances">남은 기회: 3</div>
+            <div id="total-time">총 게임 시간: 00:00</div>
+        </div>
+        <div id="result-screen" class="hidden">
+            <h2>게임 종료!</h2>
+            <div id="final-score"></div>
+            <div id="final-time"></div>
+            <button onclick="restartGame()">다시 시작</button>
+            <button onclick="submitScore()">점수 전송</button>
+            <div id="response"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentDifficulty;
+        let score = 0;
+        let chances = 3;
+        let totalTime = 0;
+        let timerInterval;
+        let energyInterval;
+        let currentQuestion;
+        let currentAnswer;
+        let roundCount = 0;
+        let gameStartTime;
+
+        const difficulties = {
+            veryHard: { time: 20, points: 20 },
+            hard: { time: 25, points: 15 },
+            medium: { time: 30, points: 13 },
+            easy: { time: Infinity, points: 10 }
+        };
+
+        function startGame(difficulty) {
+            const playerName = document.getElementById('player-name').value.trim();
+            if (!playerName) {
+                alert('이름을 입력해주세요!');
+                return;
+            }
+
+            currentDifficulty = difficulty;
+            document.getElementById('start-screen').classList.add('hidden');
+            document.getElementById('result-screen').classList.add('hidden');
+            document.getElementById('game-screen').classList.remove('hidden');
+            resetGame();
+            nextQuestion();
+            gameStartTime = Date.now();
+            updateTotalTime();
+        }
+
+        function resetGame() {
+            score = 0;
+            chances = 3;
+            roundCount = 0;
+            updateScore();
+            updateChances();
+        }
+
+        function submitScore() {
+            const playerName = document.getElementById('player-name').value.trim();
+            const elapsedTime = Math.floor((Date.now() - gameStartTime) / 1000);
+
+            saveData('시간의 차', playerName, score, elapsedTime);
+        }
+
+        async function saveData(game, name, score, elapsedTime) {
+            const FUNCTION_URL = "https://us-central1-record-f420d.cloudfunctions.net/report";
+
+            const requestData = {
+                game,
+                name,
+                score: parseInt(score, 10),
+                elapsedTime: parseInt(elapsedTime, 10)
+            };
+
+            try {
+                const response = await fetch(FUNCTION_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestData)
+                });
+
+                const responseData = await response.json();
+
+                if (response.ok) {
+                    document.getElementById('response').innerText = `성공: ${JSON.stringify(responseData, null, 2)}`;
+                } else {
+                    document.getElementById('response').innerText = `오류: ${JSON.stringify(responseData, null, 2)}`;
+                }
+            } catch (error) {
+                console.error('요청 실패:', error);
+                document.getElementById('response').innerText = `네트워크 오류: ${error.message}`;
+            }
+        }
+
+        function generateTimeSubtraction() {
+            console.log('문제를 생성합니다.');
+            if (Math.random() < 0.5) {
+                let hours1 = Math.floor(Math.random() * 12) + 1;
+                let minutes1 = Math.floor(Math.random() * 60);
+                let hours2 = Math.floor(Math.random() * hours1);
+                let minutes2 = Math.floor(Math.random() * 60);
+
+                let totalMinutes1 = hours1 * 60 + minutes1;
+                let totalMinutes2 = hours2 * 60 + minutes2;
+                let diffMinutes = totalMinutes1 - totalMinutes2;
+
+                let resultHours = Math.floor(diffMinutes / 60);
+                let resultMinutes = diffMinutes % 60;
+
+                let question = `${hours1}시간 ${minutes1}분 - ${hours2}시간 ${minutes2}분`;
+                let answer = `${resultHours}시간 ${resultMinutes}분`;
+
+                return [question, answer, resultHours, resultMinutes, true];
+            } else {
+                let minutes1 = Math.floor(Math.random() * 10);
+                let seconds1 = Math.floor(Math.random() * 60);
+                let minutes2 = Math.floor(Math.random() * minutes1);
+                let seconds2 = Math.floor(Math.random() * 60);
+
+                let totalSeconds1 = minutes1 * 60 + seconds1;
+                let totalSeconds2 = minutes2 * 60 + seconds2;
+                let diffSeconds = totalSeconds1 - totalSeconds2;
+
+                let resultMinutes = Math.floor(diffSeconds / 60);
+                let resultSeconds = diffSeconds % 60;
+
+                let question = `${minutes1}분 ${seconds1}초 - ${minutes2}분 ${seconds2}초`;
+                let answer = `${resultMinutes}분 ${resultSeconds}초`;
+
+                return [question, answer, resultMinutes, resultSeconds, false];
+            }
+        }
+
+        function nextQuestion() {
+            clearInterval(energyInterval);
+            roundCount++;
+            let [question, answer, correctHours, correctMinutes, isHourMinute] = generateTimeSubtraction();
+            console.log(`생성된 문제: ${question}, 정답: ${answer}`);
+            currentQuestion = question;
+            currentAnswer = answer;
+
+            document.getElementById('question').textContent = `${currentQuestion} = ?`;
+
+            let answerOptions = [currentAnswer];
+            while (answerOptions.length < 4) {
+                let wrongAnswer = generateWrongAnswer(correctHours, correctMinutes, isHourMinute);
+                if (!answerOptions.includes(wrongAnswer)) {
+                    answerOptions.push(wrongAnswer);
+                }
+            }
+            answerOptions = answerOptions.sort(() => Math.random() - 0.5);
+
+            let buttons = document.getElementById('answer-buttons').getElementsByTagName('button');
+            for (let i = 0; i < buttons.length; i++) {
+                buttons[i].textContent = answerOptions[i];
+            }
+
+            startEnergyBar();
+        }
+
+        function generateWrongAnswer(correctHours, correctMinutes, isHourMinute) {
+            let wrongHours = correctHours;
+            let wrongMinutes = correctMinutes;
+
+            while (wrongHours === correctHours && wrongMinutes === correctMinutes) {
+                wrongHours = Math.max(0, correctHours + Math.floor(Math.random() * 3) - 1);
+                wrongMinutes = (correctMinutes + (Math.floor(Math.random() * 5) + 1) * 10) % 60;
+            }
+
+            if (isHourMinute) {
+                return `${wrongHours}시간 ${wrongMinutes}분`;
+            } else {
+                return `${wrongHours}분 ${wrongMinutes}초`;
+            }
+        }
+
+        function startEnergyBar() {
+            let timeLimit = difficulties[currentDifficulty].time;
+            if (timeLimit === Infinity) return;
+
+            let energyFill = document.getElementById('energy-fill');
+            energyFill.style.width = '100%';
+
+            let startTime = Date.now();
+            energyInterval = setInterval(() => {
+                let elapsedTime = Date.now() - startTime;
+                let remainingPercentage = 100 - (elapsedTime / (timeLimit * 1000) * 100);
+                energyFill.style.width = `${remainingPercentage}%`;
+
+                if (remainingPercentage <= 0) {
+                    clearInterval(energyInterval);
+                    chances--;
+                    updateChances();
+                    if (chances > 0) {
+                        nextQuestion();
+                    } else {
+                        endGame();
+                    }
+                }
+            }, 100);
+        }
+
+        function checkAnswer(index) {
+            clearInterval(energyInterval);
+            let selectedAnswer = document.getElementById('answer-buttons').getElementsByTagName('button')[index].textContent;
+            if (selectedAnswer === currentAnswer) {
+                score += difficulties[currentDifficulty].points;
+                updateScore();
+                nextQuestion();
+            } else {
+                chances--;
+                updateChances();
+                if (chances > 0) {
+                    alert(`틀렸습니다. 정답은 ${currentAnswer}입니다.`);
+                    nextQuestion();
+                } else {
+                    endGame();
+                }
+            }
+        }
+
+        function updateScore() {
+            document.getElementById('score').textContent = `점수: ${score}`;
+        }
+
+        function updateChances() {
+            document.getElementById('chances').textContent = `남은 기회: ${chances}`;
+        }
+
+        function updateTotalTime() {
+            timerInterval = setInterval(() => {
+                let elapsedSeconds = Math.floor((Date.now() - gameStartTime) / 1000);
+                let minutes = Math.floor(elapsedSeconds / 60);
+                let seconds = elapsedSeconds % 60;
+                document.getElementById('total-time').textContent = `총 게임 시간: ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            }, 1000);
+        }
+
+        function endGame() {
+            clearInterval(timerInterval);
+            clearInterval(energyInterval);
+            
+            let finalTime = document.getElementById('total-time').textContent.split(': ')[1];
+            
+            document.getElementById('game-screen').classList.add('hidden');
+            document.getElementById('result-screen').classList.remove('hidden');
+            
+            document.getElementById('final-score').textContent = `최종 점수: ${score}점`;
+            document.getElementById('final-time').textContent = `총 게임 시간: ${finalTime}`;
+        }
+
+        function restartGame() {
+            document.getElementById('result-screen').classList.add('hidden');
+            document.getElementById('start-screen').classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
